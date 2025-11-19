@@ -646,14 +646,18 @@ namespace android
         {
             if (!activity || !activity->vm || !activity->clazz)
                 return nullptr;
-
+        
             anwcreator::detail::jni::JNIEnvironment jniEnv(activity->vm);
             if (!jniEnv.IsValid())
                 return nullptr;
 
+            char sdkBuf[PROP_VALUE_MAX]{0};
+            __system_property_get("ro.build.version.sdk", sdkBuf);
+            const int apiLevel = atoi(sdkBuf);
+        
             int32_t width = options.width;
             int32_t height = options.height;
-
+        
             if (width <= 0 || height <= 0)
             {
                 auto displayInfo = anwcreator::detail::framework::Display::GetDisplayInfo(jniEnv, activity);
@@ -668,12 +672,22 @@ namespace android
             anwcreator::detail::framework::SurfaceControl::Builder builder(jniEnv);
             if (!builder.IsValid())
                 return nullptr;
-
+        
             builder.SetName(options.name).SetBufferSize(width, height).SetSkipScreenshot(options.skipScreenshot);
 
-            if (parentSC)
-                builder.SetParent(parentSC);
+            if (apiLevel == 29)
+            {
+                if (parentSC)
+                    builder.SetParent(parentSC);
 
+                builder.SetFlags(0, 0);
+            }
+            else
+            {
+                if (parentSC)
+                    builder.SetParent(parentSC);
+            }
+        
             jobject localSurfaceControl = builder.Build();
             if (!localSurfaceControl || jniEnv.CheckException("Builder.build()"))
             {
@@ -687,19 +701,33 @@ namespace android
             context->height = height;
             context->skipScreenshot = options.skipScreenshot;
             context->surfaceControl = std::make_unique<anwcreator::detail::jni::GlobalRef>(jniEnv, localSurfaceControl);
+
             {
                 anwcreator::detail::framework::SurfaceControl::Transaction transaction(jniEnv);
                 if (transaction.IsValid())
                 {
-                    transaction.SetAlpha(context->surfaceControl->get(), 1.0f)
+                    transaction
+                        .SetAlpha(context->surfaceControl->get(), 1.0f)
                         .SetLayer(context->surfaceControl->get(), 0x7FFFFFFE)
                         .Show(context->surfaceControl->get())
                         .Apply();
+
+                    if (apiLevel == 29)
+                    {
+                        jclass tCls = jniEnv->GetObjectClass(transaction.transaction);
+                        if (tCls)
+                        {
+                            jmethodID syncMethod = jniEnv->GetStaticMethodID(tCls, "sync", "()V");
+                            if (syncMethod)
+                                jniEnv->CallStaticVoidMethod(tCls, syncMethod);
+                            jniEnv->DeleteLocalRef(tCls);
+                        }
+                    }
                 }
             }
 
             jobject localSurface = anwcreator::detail::framework::Surface::CreateFromSurfaceControl(jniEnv, context->surfaceControl->get());
-
+        
             if (!localSurface || jniEnv.CheckException("Create Surface"))
             {
                 jniEnv->DeleteLocalRef(localSurfaceControl);
@@ -707,10 +735,10 @@ namespace android
                     jniEnv->DeleteLocalRef(parentSC);
                 return nullptr;
             }
-
+        
             context->surface = std::make_unique<anwcreator::detail::jni::GlobalRef>(jniEnv, localSurface);
-
             context->nativeWindow = ANativeWindow_fromSurface(jniEnv, context->surface->get());
+        
             if (!context->nativeWindow)
             {
                 jniEnv->DeleteLocalRef(localSurface);
@@ -718,17 +746,16 @@ namespace android
                 if (parentSC)
                     jniEnv->DeleteLocalRef(parentSC);
                 return nullptr;
-                }
-
+            }
+        
             ANativeWindow *result = context->nativeWindow;
-
             m_windowContexts.emplace(result, std::move(context));
-
+        
             jniEnv->DeleteLocalRef(localSurface);
             jniEnv->DeleteLocalRef(localSurfaceControl);
             if (parentSC)
                 jniEnv->DeleteLocalRef(parentSC);
-
+        
             return result;
         }
 
