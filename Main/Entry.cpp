@@ -19,7 +19,7 @@ static void MyStart()
         }
 
         // 参考 android_native_app_glue.h 获取 ANativeActivity
-        android::AImGui imgui({*(ANativeActivity**)(*(uintptr_t*)(Data.libUE4 + 0xE47E480) + sizeof(void*) * 3), false});
+        android::AImGui imgui({*(ANativeActivity**)(*(uintptr_t*)(Data.libUE4 + 0x16b95990) + sizeof(void*) * 3), true});
 
         bool state = true, showDemoWindow = false, showAnotherWindow = false;
         while (state)
@@ -62,6 +62,7 @@ static void MyStart()
             imgui.EndFrame();
             std::this_thread::sleep_for(std::chrono::milliseconds(16)); // 60fps
         }
+        imgui.Destroy();
 
     }).detach();
 }
