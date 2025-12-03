@@ -34,14 +34,16 @@ namespace android
 
     private:
         bool m_state = false;
-        int32_t m_screenWidth = -1;
-        int32_t m_screenHeight = -1;
+
+        int m_rotateTheta = 0;
+        int m_screenWidth = -1, m_screenHeight = -1;
+        
         Options m_options;
 
         ANativeWindow *m_nativeWindow = nullptr;
-        EGLDisplay m_display = EGL_NO_DISPLAY;
-        EGLSurface m_surface = EGL_NO_SURFACE;
-        EGLContext m_context = EGL_NO_CONTEXT;
+        EGLDisplay m_defaultDisplay = EGL_NO_DISPLAY;
+        EGLSurface m_eglSurface = EGL_NO_SURFACE;
+        EGLContext m_eglContext = EGL_NO_CONTEXT;
         ImGuiContext *m_imguiContext = nullptr;
     };
 

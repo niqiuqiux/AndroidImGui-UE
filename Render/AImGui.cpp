@@ -19,6 +19,15 @@ namespace android
         if (!m_state)
             return;
 
+        auto displayInfo = ANwCreator::GetDisplayInfo(m_options.activity);
+
+        // Check if display orientation is changed
+        if (m_rotateTheta != displayInfo.theta)
+        {
+            UnInitEnvironment();
+            InitEnvironment();
+        }
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplAndroid_NewFrame();
         ImGui::NewFrame();
@@ -32,7 +41,7 @@ namespace android
         ImGui::Render();
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        eglSwapBuffers(m_display, m_surface);
+        eglSwapBuffers(m_defaultDisplay, m_eglSurface);
     }
 
     bool AImGui::InitEnvironment()
@@ -60,14 +69,14 @@ namespace android
         m_screenWidth = displayInfo.width;
         m_screenHeight = displayInfo.height;
 
-        m_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if (EGL_NO_DISPLAY == m_display)
+        m_defaultDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (EGL_NO_DISPLAY == m_defaultDisplay)
         {
             LogError("eglGetDisplay failed: %d", eglGetError());
             return false;
         }
 
-        if (EGL_TRUE != eglInitialize(m_display, nullptr, nullptr))
+        if (EGL_TRUE != eglInitialize(m_defaultDisplay, nullptr, nullptr))
         {
             LogError("eglInitialize failed: %d", eglGetError());
             return false;
@@ -87,7 +96,7 @@ namespace android
             EGL_SAMPLE_BUFFERS, 0,
             EGL_NONE};
 
-        if (EGL_TRUE != eglChooseConfig(m_display, attribs, &config, 1, &numConfig))
+        if (EGL_TRUE != eglChooseConfig(m_defaultDisplay, attribs, &config, 1, &numConfig))
         {
             LogError("eglChooseConfig failed: %d", eglGetError());
             return false;
@@ -100,7 +109,7 @@ namespace android
         }
 
         EGLint format;
-        if (EGL_TRUE != eglGetConfigAttrib(m_display, config, EGL_NATIVE_VISUAL_ID, &format))
+        if (EGL_TRUE != eglGetConfigAttrib(m_defaultDisplay, config, EGL_NATIVE_VISUAL_ID, &format))
         {
             LogError("eglGetConfigAttrib failed: %d", eglGetError());
             return false;
@@ -108,8 +117,8 @@ namespace android
 
         ANativeWindow_setBuffersGeometry(m_nativeWindow, 0, 0, format);
 
-        m_surface = eglCreateWindowSurface(m_display, config, m_nativeWindow, nullptr);
-        if (EGL_NO_SURFACE == m_surface)
+        m_eglSurface = eglCreateWindowSurface(m_defaultDisplay, config, m_nativeWindow, nullptr);
+        if (EGL_NO_SURFACE == m_eglSurface)
         {
             LogError("eglCreateWindowSurface failed: %d", eglGetError());
             return false;
@@ -119,14 +128,14 @@ namespace android
             EGL_CONTEXT_CLIENT_VERSION, 3,
             EGL_NONE};
 
-        m_context = eglCreateContext(m_display, config, EGL_NO_CONTEXT, contextAttribs);
-        if (EGL_NO_CONTEXT == m_context)
+        m_eglContext = eglCreateContext(m_defaultDisplay, config, EGL_NO_CONTEXT, contextAttribs);
+        if (EGL_NO_CONTEXT == m_eglContext)
         {
             LogError("eglCreateContext failed: %d", eglGetError());
             return false;
         }
 
-        if (EGL_TRUE != eglMakeCurrent(m_display, m_surface, m_surface, m_context))
+        if (EGL_TRUE != eglMakeCurrent(m_defaultDisplay, m_eglSurface, m_eglSurface, m_eglContext))
         {
             LogError("eglMakeCurrent failed: %d", eglGetError());
             return false;
@@ -135,6 +144,8 @@ namespace android
         IMGUI_CHECKVERSION();
 
         m_imguiContext = ImGui::CreateContext();
+        if (nullptr == m_imguiContext)
+            return false;
 
         auto &io = ImGui::GetIO();
         io.IniFilename = nullptr;
@@ -152,6 +163,10 @@ namespace android
         glViewport(0, 0, m_screenWidth, m_screenHeight);
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
+        m_rotateTheta = displayInfo.theta;
+        m_screenWidth = displayInfo.width;
+        m_screenHeight = displayInfo.height;
+
         return (m_state = true);
     }
 
@@ -163,36 +178,38 @@ namespace android
         {
             ImGui_ImplOpenGL3_Shutdown();
             ImGui_ImplAndroid_Shutdown();
-            ImGui::DestroyContext(m_imguiContext);
-            m_imguiContext = nullptr;
+            // ImGui::DestroyContext(m_imguiContext);
+            ImGui::SetCurrentContext(nullptr);
         }
 
-        if (EGL_NO_DISPLAY != m_display)
+        if (EGL_NO_DISPLAY != m_defaultDisplay)
         {
-            eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglMakeCurrent(m_defaultDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-            if (EGL_NO_CONTEXT != m_context)
+            if (EGL_NO_CONTEXT != m_eglContext)
             {
-                eglDestroyContext(m_display, m_context);
-                m_context = EGL_NO_CONTEXT;
+                eglDestroyContext(m_defaultDisplay, m_eglContext);
             }
 
-            if (EGL_NO_SURFACE != m_surface)
+            if (EGL_NO_SURFACE != m_eglSurface)
             {
-                eglDestroySurface(m_display, m_surface);
-                m_surface = EGL_NO_SURFACE;
+                eglDestroySurface(m_defaultDisplay, m_eglSurface);
             }
 
-            eglTerminate(m_display);
-            m_display = EGL_NO_DISPLAY;
+            eglTerminate(m_defaultDisplay);
         }
 
         if (nullptr != m_nativeWindow)
         {
             ANativeWindow_release(m_nativeWindow);
             ANwCreator::Destroy(m_options.activity, m_nativeWindow);
-            m_nativeWindow = nullptr;
         }
+
+        m_imguiContext = nullptr;
+        m_eglContext = EGL_NO_CONTEXT;
+        m_eglSurface = EGL_NO_SURFACE;
+        m_defaultDisplay = EGL_NO_DISPLAY;
+        m_nativeWindow = nullptr;
     }
 
 } // namespace android
